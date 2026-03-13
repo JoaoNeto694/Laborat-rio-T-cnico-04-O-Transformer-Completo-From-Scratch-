@@ -80,7 +80,7 @@ def layer_norm(X, epsilon=1e-6):
 # O encoder block empilha o multi-head attention e o feed-forward com normalização depois de cada uma delas.
 # Também é idêntica a classe do laboratório 2.
 class EncoderBlock:
-    def _init_(self, d_model, h, d_ffn):
+    def __init__(self, d_model, h, d_ffn):
         self.mha = MultiHeadAttention(d_model, h)
         self.ffn = FeedForwardNetwork(d_model, d_ffn)
 
@@ -117,7 +117,7 @@ def cross_attention(encoder_out, dec_state):
     return output, weights
 
 class DecoderBlock:
-    def _init_(self, d_model, h, d_ffn):
+    def __init__(self, d_model, h, d_ffn):
         self.mha = MultiHeadAttention(d_model, h)
         self.ffn = FeedForwardNetwork(d_model, d_ffn)
 
@@ -129,14 +129,87 @@ class DecoderBlock:
         # com normalização depois de cada uma delas
         # Depois é aplicado o FFN, mais uma camada de normalização e a saída é retornada.
         self_att_out = self.mha.forward(X, mask_dec)
-        X_dec = layer_norm(X + self_att_out)
-        cross_out, _ = cross_attention(encoder_out, X_dec)
-        X_dec = layer_norm(X_dec + cross_out)
-        X_ffn = self.ffn.forward(X_dec)
-        X_out = layer_norm(X_dec + X_ffn)
+        X_norm1 = layer_norm(X + self_att_out)
+        cross_out, _ = cross_attention(encoder_out, X_norm1)
+        X_norm2 = layer_norm(X_norm1 + cross_out)
+        X_ffn = self.ffn.forward(X_norm2)
+        X_out = layer_norm(X_norm2 + X_ffn)
         return X_out
 
 # Linear aplicando o softmax como pedido.
 def linear(X, W, b):
     logits = X @ W + b
     return softmax(logits)
+
+# Tarefa 4: A Prova Final (Inferência)
+# Aqui também foi tirado em maioria do final do laboratório 3, só algumas adequações a mais pois fiz diferente 
+# na parte de adquirir as propabilidades.
+vocab = ["<START>", "<EOS>", "Thinking", "Machines"]
+vocab_size = len(vocab)
+
+# Projeção final: Linear + Softmax
+W_out = np.random.randn(d_model, vocab_size) * 0.1
+b_out = np.zeros(vocab_size)
+
+# Embeddings aleatórios
+embeddings = np.random.randn(vocab_size, d_model) * 0.01
+
+d_ffn = 2048
+h = 8
+N = 6
+
+# Pilhas do encoder e decoder
+encoder_blocks = [EncoderBlock(d_model, h, d_ffn) for _ in range(N)]
+decoder_blocks = [DecoderBlock(d_model, h, d_ffn) for _ in range(N)]
+
+# Passa o tensor X por todos os blocos do encoder
+def run_encoder(X):
+    Z = X
+    for block in encoder_blocks:
+        Z = block.forward(Z)
+    return Z
+
+# Passa Y e Z por todos os blocos do decoder
+def run_decoder(Y, Z):
+    out = Y
+    for block in decoder_blocks:
+        out = block.forward(out, Z)
+    return out
+
+
+# Os índices 2 e 3 no vocabulario são "Thinking", "Machines"
+encoder_input = np.vstack([embeddings[2], embeddings[3]])
+
+Z = run_encoder(encoder_input)
+
+# Laço auto-regressivo: começa em <START>, termina em <EOS> ou em max_steps
+# (com pesos aleatórios o modelo não está treinado, então pode ficar repetindo um token;
+#  max_steps evita loop infinito)
+decoder_input = embeddings[0 : 0 + 1]
+gerados = []
+MAX_TOKENS = 20
+
+step = 0
+while True:
+    step += 1
+    decoder_output = run_decoder(decoder_input, Z)
+    probs = linear(decoder_output, W_out, b_out)
+    next_probs = probs[-1]
+    next_token_id = int(np.argmax(next_probs))
+    gerados.append(next_token_id)
+
+    if next_token_id == 1:
+        break
+
+    print(f"Passo {step:2d}: '{vocab[next_token_id]}' (id={next_token_id}, prob={next_probs[next_token_id]:.6f})")
+
+    if len(gerados) >= MAX_TOKENS:
+        print(f"\nLimite de {MAX_TOKENS} tokens atingido. Geração encerrada.")
+        break
+
+    novo_vetor = embeddings[next_token_id].reshape(1, -1)
+    decoder_input = np.vstack([decoder_input, novo_vetor])
+
+# Sequência gerada
+tokens_gerados = [vocab[i] for i in gerados]
+print("Tokens gerados:", tokens_gerados)
