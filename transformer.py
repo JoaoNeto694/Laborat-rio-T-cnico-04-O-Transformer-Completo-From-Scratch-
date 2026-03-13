@@ -35,7 +35,7 @@ class MultiHeadAttention:
         # Nota: os pesos são inicializados com valores pequenos (multiplicados por 0.1) 
         # paara evitar que o softmax colapse. Tive esse problema e perguntei a IA o que fazer, e ela me sugeriu isso.
 
-    def forward(self, X):
+    def forward(self, X, mask=None):
         Qs, Ks, Vs = [], [], []
 
         # Cada cabeca i gera suas projecoes locais
@@ -55,7 +55,7 @@ class MultiHeadAttention:
         V = V_cat @ self.W_V_G
 
         # Z = softmax( Q @ K^T / sqrt(d_model) ) @ V
-        output, _ = scaled_dot_product_attention(Q, K, V)
+        output, _ = scaled_dot_product_attention(Q, K, V, mask=mask)
         return output
 
 class FeedForwardNetwork:
@@ -92,3 +92,51 @@ class EncoderBlock:
         X_ffn = self.ffn.forward(X_norm1)
         X_out = layer_norm(X_norm1 + X_ffn)
         return X_out
+    
+
+# Tarefa 3: Montando a Pilha do Decoder 
+# Aqui fiz mais coisas, copiei e colei os métodos (com exceção do linear) e criei o DecoderBlock estruturando como
+# foi pedido. Tive que alterra o MultiHeadAttention para receber a máscara e funcionar no decoder. O resto foi adequação.
+def create_causal_mask(seq_len):
+    mask = np.triu(np.full((seq_len, seq_len), -np.inf), k=1)
+    return mask
+
+d_model = 512
+W_Q_cross = np.random.randn(d_model, d_model) * 0.1
+W_K_cross = np.random.randn(d_model, d_model) * 0.1
+W_V_cross = np.random.randn(d_model, d_model) * 0.1
+
+def cross_attention(encoder_out, dec_state):
+    Q = dec_state   @ W_Q_cross 
+    K = encoder_out @ W_K_cross 
+    V = encoder_out @ W_V_cross 
+
+    # A atenção cruzada tem as projeções de K e V feitas a partir da saída do encoder, 
+    # enquanto Q é projetado a partir do estado atual do decoder.
+    output, weights = scaled_dot_product_attention(Q, K, V, mask=None)
+    return output, weights
+
+class DecoderBlock:
+    def _init_(self, d_model, h, d_ffn):
+        self.mha = MultiHeadAttention(d_model, h)
+        self.ffn = FeedForwardNetwork(d_model, d_ffn)
+
+    def forward(self, X, encoder_out):
+        seq_atual = len(X)
+        mask_dec  = create_causal_mask(seq_atual)
+
+        # O bloco do encoder descrito é composto por uma camada de multi-head attention e seguida por uma camada feed-forward,
+        # com normalização depois de cada uma delas
+        # Depois é aplicado o FFN, mais uma camada de normalização e a saída é retornada.
+        self_att_out = self.mha.forward(X, mask_dec)
+        X_dec = layer_norm(X + self_att_out)
+        cross_out, _ = cross_attention(encoder_out, X_dec)
+        X_dec = layer_norm(X_dec + cross_out)
+        X_ffn = self.ffn.forward(X_dec)
+        X_out = layer_norm(X_dec + X_ffn)
+        return X_out
+
+# Linear aplicando o softmax como pedido.
+def linear(X, W, b):
+    logits = X @ W + b
+    return softmax(logits)
