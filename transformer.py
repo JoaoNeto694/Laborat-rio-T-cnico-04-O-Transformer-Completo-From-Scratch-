@@ -76,3 +76,19 @@ def layer_norm(X, epsilon=1e-6):
     mean = np.mean(X, axis=-1, keepdims=True)
     var  = np.var(X,  axis=-1, keepdims=True)
     return (X - mean) / np.sqrt(var + epsilon)
+
+# O encoder block empilha o multi-head attention e o feed-forward com normalização depois de cada uma delas.
+# Também é idêntica a classe do laboratório 2.
+class EncoderBlock:
+    def _init_(self, d_model, h, d_ffn):
+        self.mha = MultiHeadAttention(d_model, h)
+        self.ffn = FeedForwardNetwork(d_model, d_ffn)
+
+    def forward(self, X):
+        # O bloco do encoder descrito é composto por uma camada de multi-head attention e seguida por uma camada feed-forward,
+        # com normalização depois de cada uma delas
+        X_att = self.mha.forward(X)
+        X_norm1 = layer_norm(X + X_att)
+        X_ffn = self.ffn.forward(X_norm1)
+        X_out = layer_norm(X_norm1 + X_ffn)
+        return X_out
